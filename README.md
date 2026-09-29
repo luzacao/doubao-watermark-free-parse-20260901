@@ -1,26 +1,51 @@
-# 网页复制保存 vs 接口批量：抖音快手去水印谁更省事
+# 一个剪辑师的深夜救火：直链过期、防盗链和代理播放，抖音去水印 API 到底怎么绕
 
-先说个场景。你手上有一批抖音、快手的分享链接，可能是自己账号的备份，也可能是授权拿到的素材。如果只有三五条，打开 [https://video.zacao.top](https://video.zacao.top) 手动粘一下完全够了——**打开网页即可使用，无需访问密码**。但如果是一百条、一千条呢？手动点一遍，手指先报废。
+凌晨一点，阿凯还在赶一条二创。
 
-这篇就按测评的老路子来：把「自己下」「群里找工具」「用 video.zacao.top 去水印接口」三条件摆在一起对比，再看结论。
+他做短视频剪辑，今晚要处理三十多条抖音素材。白天从别处拿到的所谓"无水印直链"，下午还能播，晚上一打开——404。换了几条快手，播放器干脆转圈，抓包一看，403，源站 Referer 不对。
 
-## 三条件横向对比
+"链接又不是没存，怎么过几个小时就死了？"他在群里发牢骚。
 
-| 维度 | 自己手动下 | 群里找现成工具 | 短视频去水印 API |
-| --- | --- | --- | --- |
-| 单条耗时 | 打开App→复制→粘贴→保存，约半分钟 | 看工具心情，弹窗广告先来一波 | 一条 POST 请求，毫秒级返回 |
-| 批量能力 | 基本没有，纯靠手速 | 大多单条，少数支持粘贴列表 | 循环调用即可，千条也是机器的事 |
-| 稳定性 | 取决于你手抖不抖 | 来源不明，说没就没 | 30+ 平台统一入口，域名自动分流 |
-| 接入成本 | 零 | 零，但风险自担 | 一个 Key + 一个接口，半天能跑通 |
-| 可控性 | 完全手动 | 黑盒 | 返回结构化 JSON，字段齐全 |
+这个问题，做素材、做电商图、做自媒体二创的人几乎都撞过。直链有时效、有防盗链，图省事直接嵌 `source_video_url`，迟早翻车。
 
-手动下的问题不在慢，在于**不可复用**。今天下十条，明天再来十条，流程一模一样，却每次都要人肉参与。群里找的工具呢，省了手，但把主动权交给了别人——它什么时候挂、会不会夹带私货，你说了不算。
+阿凯后来换了个思路，不自己硬扛，直接走 [https://video.zacao.top](https://video.zacao.top) 这套解析。**打开网页即可使用，无需访问密码**，首页就能不带 Key 试解析，每个 IP 每小时 30 次——先验证能不能拿到地址，再谈对接。
 
-## 接口这条路，到底怎么走
+## 一、直链为什么会"当场去世"
 
-正式对接的 Base URL 是 `https://video.zacao.top`，解析接口是 `POST /api/parse`，鉴权走 Header `X-API-Key`。就这三件事，没有隐藏关卡。
+平台给的播放地址，本质是带签名的临时凭证。签名里通常绑了过期时间和来源约束，时间一到，链接作废；来源一换，防盗链拦下。
 
-最小可用的一段：
+所以你会遇到两种典型现象：
+
+- 解析时拿到地址，几小时后播放器 403。
+- 拿到地址，浏览器能播，自己的 App 里播不动。
+
+`/api/parse` 返回里同时给了 `video_url` 和 `source_video_url`。前者部分平台已经是站内代理路径，后者是原始地址。**别把 `source_video_url` 当永久 CDN 用**，这是第一条铁律。
+
+## 二、防盗链上来了，就交给代理
+
+快手、部分小红书素材，源站会检查 Referer。你自己去拉，请求头不对就是 403。
+
+接口这边留了 `GET /api/video/stream`：
+
+```text
+GET /api/video/stream?url=<urlencoded>&referer=<urlencoded>
+```
+
+`url` 是源视频地址，URL 编码；`referer` 可选，填源站。代理会带着合适的头去取流，你拿到的是一个能直接播的路径。
+
+其实很多时候不用手动调——`/api/parse` 在部分平台已经自动把 `video_url` 换成了站内代理。v2 接口还额外给了 `streamUrl` 字段，走了代理时才有值，为空说明这条是直链。
+
+## 三、阿凯最后是怎么接的
+
+他把流程拆成三步，十分钟跑通。
+
+**Base URL** 就一个：
+
+```text
+https://video.zacao.top
+```
+
+**解析接口** 是 `POST /api/parse`，鉴权走 Header `X-API-Key`：
 
 ```bash
 curl -X POST 'https://video.zacao.top/api/parse' \
@@ -29,30 +54,40 @@ curl -X POST 'https://video.zacao.top/api/parse' \
   -d '{"text":"9.01 复制打开抖音，看看https://v.douyin.com/xxxxx/"}'
 ```
 
-注意 `text` 里可以直接丢整段分享口令，接口会自己把链接抽出来，不需要你先做正则清洗。返回的 `data` 里有 `video_url`、`source_video_url`、`cover_url`、`image_list`、`author` 等字段，图集和实况也覆盖。抖音、快手、豆包、即梦、小红书、视频号、B站等一共 30+ 平台，靠域名自动识别，调用方不用传 `platform`。
+注意 `text` 可以直接丢整段分享口令，接口自己从文案里抽链接，不用先手动拆短链。抖音、快手、豆包、即梦、小红书、视频号等 30+ 平台按域名自动分流，调用方不用传 `platform`。
 
-想先在浏览器里摸一遍字段长什么样，去 [https://video.zacao.top](https://video.zacao.top) 首页，**打开网页即可使用，无需访问密码**。首页体验可以不带 Key，每个 IP 每小时 30 次；超过这个量或者要正式接进项目，就去购买页拿 Key。
+Python 侧更短：
 
-## 批量场景里，接口赢在哪
+```python
+import requests
 
-- **可编排**：拿到链接列表，写个 for 循环，配合并发，几分钟跑完人工一晚上的量。
-- **可落库**：结构化 JSON 直接进数据库，标题、作者、封面各归各的字段，后续检索、去重都方便。
-- **可兜底**：直链有时效，接口本身也提示解析成功后尽快转存。部分平台防盗链，`/api/parse` 会把 `video_url` 换成站内代理路径，或者你自己调 `GET /api/video/stream` 处理。
-- **可探活**：`curl https://video.zacao.top/api/health` 一条命令确认服务状态，接监控里也顺手。
+r = requests.post(
+    "https://video.zacao.top/api/parse",
+    headers={"X-API-Key": "mp_xxxx"},
+    json={"text": "https://v.kuaishou.com/xxxxx"},
+    timeout=30,
+)
+print(r.json())
+```
 
-**要批量去水印，就把 video.zacao.top 的接口接进你的流程里**——手点一百次，不如代码跑一轮。
+返回的 `data` 里，`video_url` 拿去播，`cover_url` 做封面，图集看 `image_list`，实况图元素会是 `{ "url", "live_photo_url" }`。作者信息在 `author`。
 
-## 结论
+**正式对接**要 Key，去 [https://video.zacao.top/buy](https://video.zacao.top/buy) 自助下单。首页那 30 次/小时只够验证，不够跑量。
 
-单条、偶尔用，网页版足够；成规模、要自动化，接口是唯一不折腾的选择。两者的 Key 和额度规则是同一套：首页匿名每小时 30 次够你验证，正式用量去购买页自助下单。
+## 四、几个让人少熬一小时的细节
 
-再补两个容易踩的点：豆包、即梦这类生成内容要用 App 或网页里的**分享链接**，别传对话页内部地址；快手、小红书短链有时要完整口令，解析失败让用户重新复制一次往往就好了。
+- **解析成功就尽快转存**，直链会过期，这不是接口的问题，是平台的规则。
+- **豆包 / 即梦要传分享链接**，别把对话页内部 URL 丢进来，那个解析不了。
+- **快手、小红书短链偶尔要完整口令**，失败时让用户重新复制一次分享文案，比反复重试有效。
+- **错误码别忽略**：`429` 是匿名 IP 小时额度用尽，`403` 是 Key 无效或内容不可访问，`404` 往往是作品已删。
 
-最后照例提醒：直链有时效，别当永久地址缓存；素材提取请确保已获授权，遵守各平台协议和著作权法。
+整条链路要用的东西，[https://video.zacao.top/docs](https://video.zacao.top/docs) 里都列全了，源码和更新记录在 [https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)。
+
+**去水印别再跟过期直链死磕，打开 video.zacao.top 先试一条，能播再谈对接。**
 
 ## 现在就去试
 
-- 体验站（打开网页即可使用，无需访问密码）：[https://video.zacao.top](https://video.zacao.top)
+- 体验站（无需访问密码）：[https://video.zacao.top](https://video.zacao.top)
 - 接口文档：[https://video.zacao.top/docs](https://video.zacao.top/docs)
 - 购买 Key：[https://video.zacao.top/buy](https://video.zacao.top/buy)
-- GitHub 仓库：[https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)
+- GitHub：[https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)
