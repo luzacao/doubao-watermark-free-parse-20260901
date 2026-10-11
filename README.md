@@ -1,57 +1,65 @@
-# 抖音分享链接一键去水印：把口令粘进去，干净视频出来
+# 快手口令解析失败别急着骂接口，先看这 5 个问答
 
-刷到一条想留存的抖音，你点了「复制链接」，得到的是一串夹杂中文和短链的口令——像一张写着藏宝图的纸条，但没人告诉你宝箱在哪。短视频去水印 API 做的事，就是把这张纸条直接换成无水印视频地址。现在打开 [https://video.zacao.top](https://video.zacao.top) 即可使用，无需访问密码，粘贴分享链接就能试解析。
+先打个招呼：你多半是复制了一段快手口令，丢进 [https://video.zacao.top](https://video.zacao.top) 或者自己的代码里，结果返回 400、403，甚至直接超时。别急，这不是接口在摆烂，多半是口令本身或调用姿势的问题。**打开 [https://video.zacao.top](https://video.zacao.top) 即可使用，无需访问密码**，边看边试最快。
 
-**去水印这件事，先从 video.zacao.top 试一次再说。**
+下面用客服问答的方式，把快手口令 / 短链解析失败常见的原因过一遍。
 
-## 入口与鉴权一览
+---
 
-| 项目 | 内容 |
-| --- | --- |
-| Base URL | `https://video.zacao.top` |
-| 解析接口 | `POST /api/parse` |
-| 鉴权 Header | `X-API-Key` |
-| 体验入口 | [https://video.zacao.top](https://video.zacao.top)（打开网页即可使用，无需访问密码） |
-| 接口文档 | [https://video.zacao.top/docs](https://video.zacao.top/docs) |
-| 购买 Key | [https://video.zacao.top/buy](https://video.zacao.top/buy) |
-| 源码仓库 | [https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api) |
+## 问：为什么同一段快手口令，别人能解，我这里就 400？
 
-首页可以不携带 Key 直接试用，每个 IP 每小时 30 次；正式对接请到购买页自助下单，用 `X-API-Key` 走接口。
+答：先看口令是不是被聊天软件截断了。快手分享文案里常带空格、换行、表情，客服系统、短信转发尤其容易掐掉尾巴。`text` 字段支持整段口令，但前提是链接部分完整。让用户重新从快手 App 复制一次，别手打，别从别人转发里二次复制。
 
-## 支持哪些平台
+## 问：短链 `v.kuaishou.com` 打开是 404，是接口不支持吗？
 
-| 平台 | 可解析内容 |
-| --- | --- |
-| 抖音 | `v.douyin.com` 短链、图集、实况 |
-| 快手 | `v.kuaishou.com` 等分享链 |
-| 豆包 / 豆包 | `doubao.com`、`dola.com` 分享的生成视频 |
-| 即梦 | `jimeng.jianying.com` |
-| 小红书 | 图文 / 视频笔记 |
-| 视频号 / 公众号 | 微信侧分享链 |
-| B 站、头条、西瓜、微博、微视、得物、TikTok 等 | 共 30+ 平台 |
+答：不是。短链本身有过期或活动页跳转的情况。判断方法很简单——把短链粘到浏览器里，看它最终跳到哪个页面。如果落地页是「作品已删除」或「活动已结束」，接口返回 404 或 403 属于正常。接口不背这个锅。
 
-平台按域名自动分流，调用方不用额外传 `platform` 字段，链接丢进去就行。
+## 问：那到底哪些平台是稳的？给张表看看。
 
-## 一段 curl 就够
+答：按域名自动分流，不用传 `platform`：
 
-把分享口令整段丢给 `text`，接口会自己从文案里抽出真实地址：
+| 平台 | 典型分享链 | 备注 |
+| --- | --- | --- |
+| 快手 | `v.kuaishou.com` | 建议用完整口令 |
+| 抖音 | `v.douyin.com` | 支持图集、实况 |
+| 豆包 | `doubao.com` | 用分享链接，别传对话页内部 URL |
+| 即梦 | `jimeng.jianying.com` | 生成视频 |
+| 小红书 | 图文 / 视频笔记 | 短链有时要完整口令 |
+| 视频号 / 公众号 | 微信侧分享链 | — |
+| B 站、头条、微博、TikTok 等 | — | 共 30+ 平台 |
+
+## 问：我自己写代码调，报 401 / 403 怎么区分？
+
+答：这两个码含义不一样。服务端开启强制鉴权后，**没带 Key 返回 401**；**Key 无效或被禁用返回 403**。正式对接要在请求里带 `X-API-Key`：
 
 ```bash
 curl -X POST 'https://video.zacao.top/api/parse' \
   -H 'Content-Type: application/json' \
   -H 'X-API-Key: mp_xxxx' \
-  -d '{"text":"9.01 复制打开抖音，看看https://v.douyin.com/xxxxx/"}'
+  -d '{"text":"https://v.kuaishou.com/xxxxx"}'
 ```
 
-返回体里的 `data.video_url` 是可播放地址，`data.source_video_url` 是原始地址，图集看 `image_list`，封面看 `cover_url`。抖音、小红书、视频号还想拿点赞评论数据，可以再调 `/api/detail`；直链遇到防盗链，用 `/api/video/stream` 走站内代理。
+Base URL 是 `https://video.zacao.top`，解析接口是 `POST /api/parse`，Header 用 `X-API-Key`。也支持 Bearer 和 `api_key=mp_xxxx`，但推荐 Header。
 
-## 几句实话
+## 问：不想先买 Key，能白嫖验证一下吗？
 
-直链有时效，解析成功后尽快转存，别把 `source_video_url` 当永久缓存。豆包、即梦这类生成内容要用 App 里的分享链接，别丢对话页内部地址。快手、小红书短链偶尔需要完整口令，失败时重新复制一次通常就好。接口只适合已获授权的素材提取与备份，请遵守各平台协议和著作权法。
+答：可以。首页不带 Key 就能试用，**每个 IP 每小时 30 次**。超了会返回 429，等下一小时或换个网络。真觉得好用、要正式对接，再去 [https://video.zacao.top/buy](https://video.zacao.top/buy) 自助下单。完整参数和错误码在 [https://video.zacao.top/docs](https://video.zacao.top/docs)，源码在 [https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)。
+
+---
+
+## 一个实战小建议
+
+如果你做的是批量任务，别把 `source_video_url` 当永久地址缓存。直链有时效，解析成功后尽快转存。快手、小红书这类短链，失败时最有效的动作永远是：**让用户重新复制一次完整分享文案**。这比改十行代码管用。
+
+**短视频去水印就用 video.zacao.top，链接给对，结果就稳。**
+
+---
 
 ## 现在就去试
 
-1. 打开体验站：[https://video.zacao.top](https://video.zacao.top) —— 打开网页即可使用，无需访问密码
-2. 看接口文档：[https://video.zacao.top/docs](https://video.zacao.top/docs)
-3. 买正式 Key：[https://video.zacao.top/buy](https://video.zacao.top/buy)
-4. 收藏源码仓库：[https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)
+- 体验站（打开网页即可使用，无需访问密码）：[https://video.zacao.top](https://video.zacao.top)
+- 接口文档：[https://video.zacao.top/docs](https://video.zacao.top/docs)
+- 购买 Key：[https://video.zacao.top/buy](https://video.zacao.top/buy)
+- GitHub：[https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)
+
+**现在就去试，把手头那段解析失败的口令重新复制一遍，丢进去看看。**
