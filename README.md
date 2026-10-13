@@ -1,45 +1,59 @@
-# 豆包、即梦 AI 视频分享链去水印：30 秒看懂，3 步跑通
+# 小红书图文笔记别再踩坑：image_list 避坑清单，抖音快手一并去水印
 
-在 [https://video.zacao.top](https://video.zacao.top) 上，豆包和即梦的生成视频分享链，粘进去就能拿到无水印地址——**打开网页即可使用，无需访问密码**，先把这句记住，后面全是操作。
+小红书笔记的分享链接丢进去，返回的 `video_url` 是空的——不是接口坏了，是你没看 `image_list`。这个场景我见过太多次：有人半夜在群里问"小红书图文怎么解析不出来"，截图里 response 一切正常，只是他盯错了字段。
 
-> 生成一段视频只要几十秒，去掉水印不该再花半小时。把分享链丢给 [https://video.zacao.top](https://video.zacao.top)，剩下的交给接口。
+先把入口放这儿：[https://video.zacao.top](https://video.zacao.top) 打开网页即可使用，无需访问密码。首页不用 Key 就能试，每个 IP 每小时 30 次；觉得顺手再去购买 Key 正式对接。下面是图文 / 实况图这条线最容易踩的坑，一条条对着排。
 
-豆包、即梦这类 AI 生成内容，分享出来的往往是 `doubao.com`、`dola.com`、`jimeng.jianying.com` 的页面链，而不是直链。手工去扒地址又慢又容易失效。短视频去水印 API 做的事情很简单：你把 App 里「复制链接」得到的那串口令原样丢进来，它按域名自动分流，返回无水印视频、图集、封面。目前覆盖抖音、快手、豆包、即梦、小红书、视频号、B 站、TikTok 等 30+ 平台，调用方不需要传 `platform`。
+- [ ] **只读 `video_url`，图集笔记直接判死**
+  小红书图文、抖音图集、实况照片，正文内容全在 `image_list` 里。正确做法是：先看 `image_list` 是否非空，非空就按图集处理，空数组再回落到 `video_url`。体验入口：[https://video.zacao.top](https://video.zacao.top)
 
-> **想在 video.zacao.top 上把去水印接进自己的流程，先跑通一个 curl，再谈工程化。**
+- [ ] **把 `image_list` 当成纯字符串数组**
+  它有两种元素形态：字符串，或 `{ "url", "live_photo_url" }` 对象。只写 `for url in image_list` 的代码，遇到实况图会把 dict 当字符串拼接，前端直接空白。正确做法是先判类型再取值：`url` 是静态图，`live_photo_url` 是实况视频，两者都要留。
 
-## 三步操作
+- [ ] **实况图只存了静态帧，动态部分丢掉**
+  小红书实况、抖音实况的价值恰恰在那段短视频。解析出来只保存 `url`，等于把实况降级成普通图片。有 `live_photo_url` 就一并落库，播放器端再决定展示哪种。
 
-1. **先不写代码，去首页试一次。** 打开 [https://video.zacao.top](https://video.zacao.top)，首页可不带 Key 试用，每个 IP 每小时 30 次。粘贴豆包或即梦的分享链接，看返回的 `video_url`、`cover_url` 是不是你要的东西。注意：豆包 / 即梦请用 App 或网页里的**分享链接**，不要传对话页的内部 URL。
-2. **拿一把 Key，准备正式对接。** 自助下单在 [https://video.zacao.top/buy](https://video.zacao.top/buy)。请求时三选一：`X-API-Key: mp_xxxx`（推荐）、`Authorization: Bearer mp_xxxx`、或 body / query 里的 `api_key=mp_xxxx`。Key 无效或被禁用返回 `403`；服务端开启强制鉴权后，无 Key 返回 `401`。
-3. **按文档把 `POST /api/parse` 接上。** Base URL 是 `https://video.zacao.top`，解析接口是 `POST /api/parse`，Header 用 `X-API-Key`。完整字段、错误码、兼容旧客户端的 `/api/parse/v2`、作品详情的 `/api/detail`、以及防盗链用的 `/api/video/stream`，都在接口文档里：[https://video.zacao.top/docs](https://video.zacao.top/docs)。
+- [ ] **想拿图集却调错了接口**
+  图文 / 视频统一走 `POST /api/parse`，Base URL 是 `https://video.zacao.top`，Header 用 `X-API-Key`。请求体 `{"text": "分享口令"}`，`text` 也可以换成 `url`，整段分享文案直接丢进去就行，接口会自己抽链接。文档在 [https://video.zacao.top/docs](https://video.zacao.top/docs)。
 
-## 复制即用
+- [ ] **把 `source_video_url` 当永久地址缓存**
+  直链有时效，图集里的图 URL 同理。解析成功就尽快转存，别把源地址写进数据库当长期资产。防盗链的平台，`video_url` 可能已经是站内代理路径，照用即可。
 
-```bash
-curl -X POST 'https://video.zacao.top/api/parse' \
-  -H 'Content-Type: application/json' \
-  -H 'X-API-Key: mp_xxxx' \
-  -d '{"text":"https://www.doubao.com/thread/xxxxx"}'
+- [ ] **只想要数据却去调解析接口**
+  点赞、收藏、发布时间这类结构化数据在 `GET|POST /api/detail`，目前支持抖音、小红书、视频号，不返回任何图片或视频直链。想抓笔记数据就别绕解析接口，两个接口分工不同。
+
+- [ ] **链接识别靠猜平台**
+  不用传 `platform`，域名自动分流，抖音、快手、豆包、即梦、小红书、视频号、B 站、TikTok 等 30+ 平台都在这条线上。硬塞一个 `platform` 字段反而可能干扰识别。
+
+- [ ] **失败就报错，不提示用户重取链接**
+  快手、小红书的短链有时需要完整口令。解析失败先让用户回 App 重新复制一次分享文案，比对着错误码猜半天高效。错误码区分很清楚：`400` 参数或链接不支持，`403` Key 无效或内容不可访问，`404` 内容可能已删除，`429` 是匿名 IP 小时额度用尽。
+
+**去水印这件事，先在 video.zacao.top 用免费额度跑通图集和实况图，再决定要不要买 Key。**
+
+一个最小可跑的 Python 片段，重点看 `image_list` 的分支：
+
+```python
+import requests
+
+r = requests.post(
+    "https://video.zacao.top/api/parse",
+    headers={"X-API-Key": "mp_xxxx"},
+    json={"text": "小红书分享口令"},
+    timeout=30,
+)
+data = r.json().get("data", {})
+
+for item in data.get("image_list") or []:
+    if isinstance(item, str):
+        print("静态图:", item)
+    else:
+        print("静态图:", item.get("url"))
+        print("实况视频:", item.get("live_photo_url"))
 ```
 
-`text` 也可以写成 `url`，整段分享文案直接丢进去都行，接口会从文案里抽出链接。返回结构统一是 `code / message / succ / data`，`data` 里常用的几个字段：
+匿名试的时候把 `X-API-Key` 这行去掉也行，走首页那 30 次/小时的额度。正式对接请到 [https://video.zacao.top/buy](https://video.zacao.top/buy) 自助下单，源码和 issue 在 [https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)。
 
-| 字段 | 说明 |
-| --- | --- |
-| `platform` | 平台名，如 `抖音`、`快手`、`豆包` |
-| `video_url` | 可播放地址（部分平台为站内代理路径） |
-| `source_video_url` | 原始视频地址 |
-| `cover_url` | 封面 |
-| `image_list` | 图集；元素为字符串，或 `{ "url", "live_photo_url" }` |
-| `author` | 作者信息 |
-| `video_id` | 平台侧作品 ID（如有） |
-
-即梦或豆包返回图集时，`image_list` 会带上 `live_photo_url`，别只取 `url` 就完事。直链有时效，解析成功后尽快转存，不要把 `source_video_url` 当永久地址缓存。
-
-> 30+ 平台、统一响应、一个 `POST /api/parse`——去水印这件事，本就该是几行代码的体积。收藏 [https://video.zacao.top/docs](https://video.zacao.top/docs)，下次直接抄。
-
-源码与更新记录在 [https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)，欢迎提 issue。仅用于已获授权的素材提取、备份与学习，请遵守各平台用户协议与著作权法，不要用于侵权搬运。
+正文里再提醒一句：豆包、即梦这类生成内容，要用 App 或网页里的分享链接，别传对话页内部 URL；解析结果仅用于已获授权的素材提取、备份与学习。
 
 ## 现在就去试
 
