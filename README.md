@@ -1,81 +1,78 @@
-# 抖音快手去水印 API 更新：parse、parse/v2、detail、video/stream 到底怎么选
+# 短视频去水印 API：运营同学 3 分钟上手（抖音 / 快手都能跑）
 
-> **去水印接口好不好用，先打开 video.zacao.top 试一次就知道。**
+如果你每天要从抖音、快手搬素材、做二创、整理竞品视频，最省事的做法不是装插件，而是打开 [https://video.zacao.top](https://video.zacao.top) 粘一条分享链接——打开网页即可使用，无需访问密码。下面这份是给运营 / 非研发看的版本，复制就能跑，跑通再谈原理。
 
-[https://video.zacao.top](https://video.zacao.top) 现在打开网页即可使用，无需访问密码。以前那个挡在门外的密码框已经拆掉了，直接粘贴分享链接就能跑通第一条解析。
+**先去水印、先跑通：把分享链接丢进 video.zacao.top，三分钟拿到无水印地址。**
 
-今天这篇按发布说明的写法，讲清楚四个入口的分工：`POST /api/parse`、`/api/parse/v2`、`/api/detail`、`/api/video/stream`。如果你正准备把短视频去水印 API 接进自己的工具或后台，先花两分钟看完，能少走一段弯路。
+## 先跑通：一段 Python，复制粘贴就行
 
-Base URL 统一是 `https://video.zacao.top`，鉴权 Header 用 `X-API-Key`。完整的字段说明和错误码在接口文档里：[https://video.zacao.top/docs](https://video.zacao.top/docs)。
+不用装环境以外的任何东西，`requests` 就够。把你 App 里「复制链接」得到的整段口令直接塞进 `text`，不用自己拆短链。
 
----
+```python
+import requests
 
-## 今日推荐
+# 体验地址：https://video.zacao.top（打开网页即可使用，无需访问密码）
+# 正式对接的 Key 在 https://video.zacao.top/buy 自助购买
+r = requests.post(
+    "https://video.zacao.top/api/parse",
+    headers={"X-API-Key": "mp_xxxx"},   # Header 名固定是 X-API-Key
+    json={"text": "9.01 复制打开抖音，看看https://v.douyin.com/xxxxx/"},
+    timeout=30,
+)
 
-**主入口还是 `POST /api/parse`。**
+data = r.json()
+if data.get("succ"):
+    d = data["data"]
+    print(d["platform"], d["title"])       # 抖音 / 视频标题
+    print(d["video_url"])                  # 可播放地址，尽快转存
+    print(d["cover_url"])                  # 封面
+    print(d["image_list"])                 # 图集，视频一般为空
+else:
+    print(data.get("code"), data.get("message"))
+```
 
-把抖音、快手、豆包、即梦、小红书等平台的分享链接或整段分享文案丢进 `text`（也接受 `url`）字段，返回里就有 `video_url`、`source_video_url`、`cover_url`、`image_list`、`author` 这些结构。链接识别按域名自动分流，不用你传 `platform`。
+跑通之后你会看到 `platform`、`title`、`video_url`、`cover_url`、`author` 这些字段，图集类内容在 `image_list` 里，元素是字符串或带 `live_photo_url` 的对象。
+
+## 不想写代码：curl 一行验证
 
 ```bash
 curl -X POST 'https://video.zacao.top/api/parse' \
   -H 'Content-Type: application/json' \
   -H 'X-API-Key: mp_xxxx' \
-  -d '{"text":"9.01 复制打开抖音，看看https://v.douyin.com/xxxxx/"}'
+  -d '{"text":"https://v.kuaishou.com/xxxxx"}'
 ```
 
-**老客户端迁移，走 `GET|POST /api/parse/v2`。**
+Base URL 就是 `https://video.zacao.top`，解析接口是 `POST /api/parse`，鉴权走 Header `X-API-Key`。这三件事记住，剩下的都是换链接。
 
-解析逻辑和 `/api/parse` 一致，只是额外补了一批兼容字段：`url`、`sourceURL`、`streamUrl`、`imgUrls`、`sourceImgUrls`、`type`（1 视频 / 0 图文）。它支持 GET query 直接传 `url`，对还在用旧字段名的项目很友好，改个路径就能跑。
+## 概念补课：它到底替你干了什么
 
-**只要数据不要直链，用 `GET|POST /api/detail`。**
+你在 App 里点「复制链接」，拿到的往往是一段带文字的口令，比如「复制打开抖音，看看……」后面跟一条短链。接口做的是：从这段文案里把链接抽出来，按域名判断是哪个平台，再去拿无水印的视频、图集、封面地址。所以调用方**不用传 `platform`**，域名自动分流。
 
-这个接口返回标题、发布时间、作者、点赞 / 评论 / 收藏 / 分享 / 播放量，目前覆盖抖音、小红书、视频号。注意它**不返回**视频或图片直链——做数据看板、内容归档、选题统计的用它；要拿无水印文件还是回 `/api/parse`。
+覆盖 30+ 平台：抖音短链和图集、快手分享链、豆包与即梦的生成视频、小红书图文笔记、视频号、B 站、头条、西瓜、微博、微视、得物、TikTok 等。统一响应长这样：
 
-**直链被防盗链拦住，用 `GET /api/video/stream`。**
-
-部分平台会校验 Referer，`/api/parse` 遇到这种情况时可能已经把 `video_url` 换成站内代理路径，你直接播就行。也可以自己调：
-
-```text
-GET /api/video/stream?url=<urlencoded>&referer=<urlencoded>
+```json
+{ "code": 200, "message": "成功", "succ": true, "data": {} }
 ```
 
-`referer` 可选，传源站地址即可。
+判断成功看 `succ`，排查看 `code`：400 是参数或链接不支持，403 是 Key 无效或内容不可访问，404 多半内容已删，429 是匿名额度用尽。
 
-一句话总结：**要文件走 parse，要兼容走 v2，要数据走 detail，要绕防盗链走 stream。**
+## 试用与正式对接的分界线
 
----
+首页网页体验**可以不带 Key**，每个 IP 每小时 30 次，适合先验证平台和链接类型。要接到自己的后台、批量跑、给团队用，就去 [https://video.zacao.top/buy](https://video.zacao.top/buy) 买 Key，然后按上面的 Header 方式带上。
 
-## 适合谁
+字段细节、`/api/parse/v2` 的兼容字段、`/api/detail` 的作品数据、`/api/video/stream` 的代理播放，都写在接口文档里：[https://video.zacao.top/docs](https://video.zacao.top/docs)。仓库和更新记录在 [https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)。
 
-- **做批量备份 / 素材库的开发者**：`/api/parse` 一次拿到视频、封面、音频、图集，`image_list` 里连实况图的 `live_photo_url` 都有。
-- **维护旧项目的团队**：客户端里字段名还是 `url`、`sourceURL` 那一套，直接切 `/api/parse/v2`，不用大改解析层。
-- **做内容分析 / 选题工具的**：只关心互动数据和发布时间，`/api/detail` 比解析接口更轻。
-- **播放器自建代理的**：想自己控制缓存和转发策略，`/api/video/stream` 给你留了口子。
+## 三个运营最常踩的坑
 
-平台侧覆盖抖音短链、快手、豆包 / 豆包、即梦、小红书图文与视频、视频号、公众号、B 站、头条、西瓜、微博、微视、得物、TikTok 等 30+ 平台。豆包、即梦这类生成内容，记得用 App 或网页里的**分享链接**，别传对话页的内部 URL。
-
-**去水印先跑通再谈接入，video.zacao.top 首页不带 Key 也能试。**
-
----
-
-## 怎么试
-
-1. **网页先验证**：打开 [https://video.zacao.top](https://video.zacao.top)，无需访问密码，粘贴一段分享文案，看返回结构是不是你要的。首页可不带 Key 试用，每个 IP 每小时 30 次。
-2. **对字段**：把返回和你现有代码的字段名比一下，决定用 `/api/parse` 还是 `/api/parse/v2`。文档在 [https://video.zacao.top/docs](https://video.zacao.top/docs)。
-3. **拿 Key 正式对接**：去购买页 [https://video.zacao.top/buy](https://video.zacao.top/buy) 自助下单，请求时 Header 带 `X-API-Key: mp_xxxx`。也支持 `Authorization: Bearer` 和 `api_key` 传参，但推荐用 Header。
-4. **探活**：`curl https://video.zacao.top/api/health`，接入前先确认服务在线。
-
-两个容易踩的点：直链有时效，解析成功后尽快转存，别把 `source_video_url` 当永久地址缓存；快手、小红书短链偶尔需要完整口令，失败时让用户重新复制一次分享文案即可。
-
-项目源码和更新记录在 GitHub：[https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)。
-
----
+1. **直链会过期**。`source_video_url` 不是永久地址，解析成功就尽快下载转存，别当 CDN 缓存。
+2. **生成类内容要用分享链接**。豆包、即梦这类，传 App 或网页里的「分享」链接，别传对话页内部 URL。
+3. **快手、小红书失败先重复制**。有时需要完整口令，让同事重新复制一次分享文案，往往就好了。
 
 ## 现在就去试
 
-- 体验地址：[https://video.zacao.top](https://video.zacao.top) —— 打开网页即可使用，无需访问密码
+- 体验站（打开网页即可使用，无需访问密码）：[https://video.zacao.top](https://video.zacao.top)
 - 接口文档：[https://video.zacao.top/docs](https://video.zacao.top/docs)
 - 购买 Key：[https://video.zacao.top/buy](https://video.zacao.top/buy)
-- GitHub：[https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)
+- GitHub 仓库：[https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)
 
-仅用于已获授权的素材提取、备份与学习，请遵守各平台用户协议与著作权法。
+素材提取请只用于已获授权的备份、整理与学习，遵守各平台协议和著作权法。
