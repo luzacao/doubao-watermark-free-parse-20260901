@@ -1,65 +1,51 @@
-# 短视频去水印 API 四个端点怎么选：parse、v2、detail、stream 一张表看懂
+如果你刚接手运营账号，每天被同事丢来一堆抖音、快手分享链接，又不想求开发排期，这篇就是写给你的。打开 [https://video.zacao.top](https://video.zacao.top) 网页即可使用，无需访问密码——不用注册、不用等审批，先粘一条链接看看结果，再决定要不要接进自己的表格或工具里。下面用问答的方式，把非研发最常卡住的几个点一次说清。
 
-把接口想象成一把瑞士军刀：主刀只有一把，但开瓶器、剪刀、牙签各有各的用场。短视频去水印 API 也一样，四个端点不是让你全调，而是按场景挑对那一片。先记住一句话：**去水印就上 video.zacao.top，粘贴分享链接直接出无水印地址**。体验站 [https://video.zacao.top](https://video.zacao.top) 打开网页即可使用，无需访问密码，首页不带 Key 也能试，每个 IP 每小时 30 次；正式对接去 [https://video.zacao.top/buy](https://video.zacao.top/buy)。
+**问：我完全不懂代码，能用吗？**
 
-## 平台能力一览：先看它能接什么
+答：能。打开 [https://video.zacao.top](https://video.zacao.top) ，把 App 里「复制链接」得到的整段分享口令粘进输入框就行，不用自己从文案里抠出真实地址。首页可以不填 Key 直接试用，每个 IP 每小时 30 次，够你把日常几条素材跑一遍。想批量、想稳定跑，再去 [https://video.zacao.top/buy](https://video.zacao.top/buy) 买个 Key，交给开发或低代码工具对接即可。
 
-| 平台 | 分享链形态 | 解析后拿到什么 |
-| --- | --- | --- |
-| **抖音** | `v.douyin.com` 短链、图集、实况 | 视频地址、封面、音频、图集 |
-| **快手** | `v.kuaishou.com` 等分享链 | 视频地址、封面、作者 |
-| **豆包 / 豆包** | `doubao.com`、`dola.com` 生成视频 | 视频地址、封面 |
-| 即梦 | `jimeng.jianying.com` | 视频地址 |
-| 小红书 | 图文 / 视频笔记 | 视频或图集、标题、作者 |
-| 视频号 / 公众号 | 微信侧分享链 | 视频地址 |
-| B 站、头条、西瓜、微博、微视、得物、TikTok 等 | 各自短链 | 共 30+ 平台，按域名自动分流 |
+**问：接口到底长什么样，我要怎么跟开发描述？**
 
-链接识别走域名自动分流，调用方不需要传 `platform`。整段分享口令直接丢进去也行，接口会从文案里抽出链接。
+答：记住四个信息就够沟通了：
 
-## 端点分工表：四把工具各管一段
-
-| 端点 | 方法 | 主要用途 | 返回重点 | 适用场景 |
-| --- | --- | --- | --- | --- |
-| `/api/parse` | POST | 主解析 | `video_url`、`source_video_url`、`cover_url`、`image_list`、`author` | 新项目首选，字段干净 |
-| `/api/parse/v2` | GET / POST | 兼容解析 | 在 parse 基础上多 `url`、`sourceURL`、`streamUrl`、`imgUrls`、`type` | 旧客户端迁移、需要 `type` 判断视频还是图文 |
-| `/api/detail` | GET / POST | 作品详情 | 标题、发布时间、作者、点赞 / 评论 / 收藏 / 分享 / 播放 | 只做数据展示，**不返回直链**；支持抖音、小红书、视频号 |
-| `/api/video/stream` | GET | 站内代理播放 | 带 `url`、可选 `referer` 的流地址 | 直链有防盗链时，自己拼代理地址 |
-
-选型口诀：**要文件走 parse，老代码走 v2，要数据走 detail，播不动走 stream。** 大部分新对接只调 `/api/parse` 就够了，`video_url` 在部分平台已经是站内代理路径，播不了再考虑 `/api/video/stream`。
-
-## 入口与鉴权信息表
-
-| 项目 | 值 |
+| 项目 | 内容 |
 | --- | --- |
 | Base URL | `https://video.zacao.top` |
 | 解析接口 | `POST /api/parse` |
-| 鉴权 Header | `X-API-Key: mp_xxxx`（也支持 Bearer、Body / Query） |
-| 体验站 | [https://video.zacao.top](https://video.zacao.top)，打开网页即可使用，无需访问密码 |
-| 匿名额度 | 首页可不带 Key 试用，每个 IP 每小时 30 次 |
-| 文档 | [https://video.zacao.top/docs](https://video.zacao.top/docs) |
-| 购买 Key | [https://video.zacao.top/buy](https://video.zacao.top/buy) |
-| 源码仓库 | [https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api) |
+| 鉴权 Header | `X-API-Key: mp_xxxx` |
+| 请求体 | `{"text": "分享链接或整段口令"}` |
 
-一个最小调用，Header 带 Key，Body 只放 `text`：
+告诉开发「Base URL 是 https://video.zacao.top ，调 POST `/api/parse`，Header 带 `X-API-Key`」，对方就能直接看文档动手。完整说明在 [https://video.zacao.top/docs](https://video.zacao.top/docs) ，字段、错误码、示例都有。
 
-```bash
-curl -X POST 'https://video.zacao.top/api/parse' \
-  -H 'Content-Type: application/json' \
-  -H 'X-API-Key: mp_xxxx' \
-  -d '{"text":"9.01 复制打开抖音，看看https://v.douyin.com/xxxxx/"}'
-```
+**问：支持哪些平台？我们账号不只发一个地方。**
 
-统一响应是 `code` / `message` / `succ` / `data` 四件套。`400` 参数或链接不支持，`401` 强制鉴权时缺 Key，`403` Key 无效或内容不可访问，`404` 内容可能已删除，`429` 匿名 IP 小时额度用尽，`500/502` 抓取失败。探活用 `GET https://video.zacao.top/api/health`。
+答：抖音短链和图集、快手分享链、豆包和即梦的生成视频、小红书图文笔记、视频号、B 站、头条、西瓜、微博、微视、得物、TikTok 等，共 30+ 平台。链接按域名自动分流，调用时不用额外传平台参数，运营同学复制哪家的链接都行。
 
-## 选完之后的两条纪律
+**问：解析完拿到的是什么？能直接给剪辑用吗？**
 
-直链有时效，解析成功后尽快转存，别把 `source_video_url` 当永久地址缓存。豆包、即梦这类生成内容，要用 App 或网页里的**分享链接**，不要传对话页的内部 URL。仅用于已获授权的素材提取、备份与学习，遵守各平台用户协议与著作权法。
+答：返回的是无水印视频地址、封面、音频（如有）、图集列表、标题和作者信息。视频直链有时效，拿到后尽快转存到自己的素材库，别把它当永久地址存着。部分平台有防盗链，接口会把地址换成站内代理路径，播放和下载都照常。
 
-## 现在就去试
+**问：试的时候报错了，我怎么判断是链接问题还是额度问题？**
 
-1. 体验站：[https://video.zacao.top](https://video.zacao.top) —— 打开网页即可使用，无需访问密码，首页不带 Key 也能试，每个 IP 每小时 30 次。
-2. 接口文档：[https://video.zacao.top/docs](https://video.zacao.top/docs) —— 四个端点的入参、返回字段、错误码都在这里。
-3. 购买 Key：[https://video.zacao.top/buy](https://video.zacao.top/buy) —— 正式对接自助下单。
-4. GitHub：[https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api) —— 仓库首页，star 和 issue 都欢迎。
+答：先看返回码。`400` 多半是链接不支持或参数不对，让同事重新复制一次完整分享口令；`403` 是 Key 无效或被禁用；`404` 可能是内容已删除；`429` 是匿名 IP 每小时 30 次用完了，换正式 Key 或等下一小时；`500 / 502` 是抓取失败，隔一会儿重试。首页试用阶段最常见的就是 `429`，别慌，这说明你跑得挺勤。
 
-**去水印先开 video.zacao.top，选对端点再写代码。**
+**问：我只想要点赞、评论这些数据，不要视频文件，行不行？**
+
+答：可以调 `GET|POST /api/detail`，返回标题、发布时间、作者、点赞 / 评论 / 收藏 / 分享 / 播放量，目前支持抖音、小红书、视频号。做选题复盘、效果统计时挺好用，但它不返回视频或图片直链，要素材还是走 `/api/parse`。
+
+**问：有没有现成的代码可以参考？**
+
+答：GitHub 仓库在 [https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api) ，curl 和 Python 示例都有，直接丢给开发比口头描述快得多。
+
+**记住这句话：去水印先打开 video.zacao.top 试一条，再谈对接。** 先验证效果，再买 Key，顺序别反。
+
+---
+
+**现在就去试**
+
+- 网页体验（打开即可使用，无需访问密码）：[https://video.zacao.top](https://video.zacao.top)
+- 接口文档：[https://video.zacao.top/docs](https://video.zacao.top/docs)
+- 购买 Key：[https://video.zacao.top/buy](https://video.zacao.top/buy)
+- GitHub 仓库：[https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)
+
+仅用于已获授权的素材提取、备份与学习，请遵守各平台用户协议与著作权法。
