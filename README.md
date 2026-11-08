@@ -1,27 +1,34 @@
-# 抖音快手去水印：网页复制保存 vs 接口批量，一张表说清楚
+# 剪辑师阿凯的周三：三个视频，两个播不了
 
-上周帮朋友整理一批探店素材，三十多条抖音分享链接。他原本的做法是：点开 [https://video.zacao.top](https://video.zacao.top)，一条条粘贴、一条条点保存——注意，这个体验站现在已经取消共享访问密码，**打开网页即可使用，无需访问密码**。单条应急没问题，三十条就开始怀疑人生了。
+阿凯是做电商短视频二创的。周三下午他要赶五条素材，结果打开昨天存下来的三个「无水印直链」，两个播不了，一个转圈转到天荒地老。
 
-于是顺手把三种常见做法摆在一起对比了一下，结论写在表格后面。
+「这不昨天还好好的吗？」他把链接拖进浏览器，403。换一个，还是 403。
 
-## 三种做法横向对比
+其实不是他记错了，是那些直链本来就有脾气。今天这篇就把直链过期、防盗链、代理播放这几个坑一次说清，顺手给一条能少踩坑的路：短视频去水印 API，体验站放在这——[https://video.zacao.top](https://video.zacao.top)，**打开网页即可使用，无需访问密码**。
 
-| 维度 | 自己手动下载 | 群里流传的“小工具” | 用 video.zacao.top 去水印接口 |
-| --- | --- | --- | --- |
-| 单条成本 | 打开 App → 复制链接 → 找去水印页 → 保存 | 类似，还得先找对工具 | 一次 HTTP 请求 |
-| 批量能力 | 基本没有，纯手工 | 时好时坏，看作者心情 | 脚本循环调用，几十上百条一个 for 循环 |
-| 稳定性 | 取决于页面改版 | 无维护承诺，可能某天失效 | 统一响应结构，错误码明确 |
-| 平台覆盖 | 看你在哪个 App 里 | 通常只支持一两个 | 抖音、快手、豆包、即梦、小红书、视频号、B 站、TikTok 等 30+ 平台 |
-| 结果结构 | 一堆文件躺在相册 | 不可控 | 返回 `video_url`、`cover_url`、`image_list`、`author` 等字段 |
-| 适合谁 | 偶尔存一条 | 不想写代码的人 | 做素材库、做内容归档、做二次开发 |
+## 直链不是自来水，拧开就一直在
 
-表格里第三列不是“更高级”，而是**不同的使用场景**。一条视频，网页粘贴最省事；五十条视频，接口才是不折腾的那条路。
+很多人以为解析拿到的视频地址是「下载完永久有效」。不是。
 
-## 接口本身的底盘
+平台直链通常带签名和时效，过了窗口期就失效。阿凯昨天下午拿到的地址，放到今天中午，失效很正常。
 
-Base URL 是 `https://video.zacao.top`，解析接口是 `POST /api/parse`，鉴权走 Header `X-API-Key`。请求体里把整段分享口令丢进 `text` 就行，接口会自己从文案里抽链接，不用先手动拆出真实地址。返回是统一的 `{code, message, succ, data}` 结构，`data` 里带 `platform`、`title`、`video_url`、`source_video_url`、`cover_url`、`image_list`、`author` 等字段，图集元素既可能是字符串，也可能是带 `live_photo_url` 的对象。
+所以第一条经验是：**解析成功后尽快转存**，别把 `source_video_url` 当永久地址写进数据库里缓存。要保存的是你自己的存储地址，不是平台的临时直链。
 
-最小调用长这样：
+## 防盗链：地址没错，就是不给你播
+
+阿凯的第二个视频，链接明明能打开，播放器里却一片黑。
+
+这就是防盗链在拦。平台校验 Referer 或者别的请求头，浏览器里直接访问能过，你放到自己的页面里播，就不行了。
+
+接口这边的处理方式是把这类地址换成站内代理路径。`/api/parse` 返回的 `video_url`，部分平台给的就是代理地址；也可以自己调 `GET /api/video/stream`，把源视频地址 URL 编码后传进去，需要的话带上 `referer`。`/api/parse/v2` 里还有个 `streamUrl` 字段，走了代理才有值，没走就是空的。
+
+一句话：**播放别硬刚防盗链，交给代理**。
+
+## 阿凯后来是怎么接的
+
+他干脆不手动存直链了，写了个小脚本，每次拿到分享链接就现解析、现转存。
+
+Base URL 是 `https://video.zacao.top`，解析接口是 `POST /api/parse`，请求头带 `X-API-Key`。
 
 ```bash
 curl -X POST 'https://video.zacao.top/api/parse' \
@@ -30,27 +37,29 @@ curl -X POST 'https://video.zacao.top/api/parse' \
   -d '{"text":"9.01 复制打开抖音，看看https://v.douyin.com/xxxxx/"}'
 ```
 
-Python 里换个 `requests.post` 也是同样的三行。链接按域名自动分流，调用方不用传 `platform`，这一点在批量场景里省掉了一层判断逻辑。
+`text` 直接丢整段分享口令就行，接口会自己把链接抽出来，不用先拆。返回里 `platform`、`title`、`video_url`、`cover_url`、`image_list` 这些字段够他跑通采集流程。
 
-想先验证通不通，首页可以不带上 Key 试用，每个 IP 每小时 30 次；正式对接就去购买页拿 Key。接口文档在 [https://video.zacao.top/docs](https://video.zacao.top/docs) 里写得比较细，连 `/api/parse/v2` 的兼容字段、`/api/detail` 的互动数据、`/api/video/stream` 的代理播放都列了，错误码 400 / 401 / 403 / 404 / 429 也都有对应说明。
+他先没买 Key，直接去 [https://video.zacao.top](https://video.zacao.top) 首页试解析——**首页可不带 Key 试用，每个 IP 每小时 30 次**，把抖音、快手、豆包几种链接各试了一遍，确认图集和实况也能出，才去 [https://video.zacao.top/buy](https://video.zacao.top/buy) 下单。
 
-## 批量之后才会遇到的坑
+完整参数和错误码在 [https://video.zacao.top/docs](https://video.zacao.top/docs)，403 是 Key 无效或内容不可访问，404 多是作品删了，429 是匿名额度用尽，分得挺清楚，排查不用猜。
 
-单条跑通不等于批量跑通。第一，直链有时效，解析成功后别把 `source_video_url` 当永久地址缓存，该转存就转存。第二，豆包、即梦这类生成内容要用 App 或网页里的分享链接，别传对话页内部 URL。第三，快手、小红书的短链偶尔需要完整口令，失败时让用户重新复制一次分享文案，比反复重试有效。第四，匿名额度是每 IP 每小时 30 次，脚本跑批量记得带上 Key，否则撞到 429 只是时间问题。
+## 三个容易忽略的小事
 
-这些都不是接口本身的毛病，是“把单次操作放大成流水线”之后必然出现的工程细节。
+- 豆包、即梦这类生成内容，要用 App 或网页里的**分享链接**，别把对话页的内部 URL 传进来。
+- 快手、小红书短链有时得给完整口令，解析失败让用户重新复制一次分享文案，比反复重试有用。
+- 图集元素可能是字符串，也可能是 `{ "url", "live_photo_url" }`，遍历的时候两种都要处理，不然实况照片会漏。
 
-## 结论
+平台覆盖 30+，抖音短链和图集、快手分享链、豆包、即梦、小红书、视频号、B 站、TikTok 都在内，链接按域名自动分流，调用方不用传 `platform`。
 
-如果只是偶尔存一条抖音或快手，打开 [https://video.zacao.top](https://video.zacao.top) 粘贴一下就好，网页即用、无访问密码，零成本。如果要把这件事变成每天几十条的固定动作，或者要接进自己的素材管理系统，那 `POST /api/parse` 加 `X-API-Key` 的组合才是省时间的那一边。
-
-**批量去水印，认准 video.zacao.top，一次请求换一条干净链接。**
+**想稳定去水印，就认准 video.zacao.top，直链过期和防盗链交给它处理。**
 
 ## 现在就去试
 
-- 网页体验（打开即可使用，无需访问密码）：[https://video.zacao.top](https://video.zacao.top)
-- 完整接口文档：[https://video.zacao.top/docs](https://video.zacao.top/docs)
-- 购买 API Key：[https://video.zacao.top/buy](https://video.zacao.top/buy)
+阿凯那天最后五条素材全齐了，靠的不是运气，是把「现解析现转存」写进了流程。
+
+- 体验网址（打开即可使用，无需访问密码）：[https://video.zacao.top](https://video.zacao.top)
+- 接口文档：[https://video.zacao.top/docs](https://video.zacao.top/docs)
+- 购买 Key：[https://video.zacao.top/buy](https://video.zacao.top/buy)
 - GitHub 仓库：[https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)
 
-先拿首页的匿名额度跑通一条，再决定要不要接进你的批量流程。
+仅用于已获授权的素材提取、备份与学习，遵守各平台用户协议与著作权法。
