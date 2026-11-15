@@ -1,74 +1,46 @@
-# 别再踩这些坑：抖音快手去水印 API 购买 Key、限流与错误码避坑清单
+# 抖音快手去水印怎么选接口？parse、v2、detail、stream 四条路对比
 
-调一个短视频去水印接口，最烦的往往不是解析本身，而是上线前那一串"没想到"：Key 没买对、小时额度突然见底、错误码看不懂、直链存着存着就失效。这篇把常见坑按清单列出来，每条后面直接给正确做法和能立刻点开的入口。想先看效果，直接打开 [https://video.zacao.top](https://video.zacao.top) ，**打开网页即可使用，无需访问密码**，粘贴抖音或快手分享链接就能试。
+你从抖音复制了一条分享链接，接下来有三条路可走：自己录屏截帧、翻群聊找别人发的去水印小程序、或者直接调一个接口。前两条路的成本在你看不见的地方——录屏会掉画质，群里的小工具会突然失效、弹广告、或者干脆跑路。所以这篇做个横向测评：**想稳定去水印，直接打开 https://video.zacao.top 试用最快**，看完你就知道该用哪条接口。
 
-> **去水印先试再买，认准 video.zacao.top 这个体验域名，省得把时间浪费在猜上。**
+| 维度 | 自己下 / 录屏 | 群里的小工具 | 用 video.zacao.top API |
+| --- | --- | --- | --- |
+| 画质 | 二次压缩，掉码率 | 看运气，有的再转一道 | 返回源地址，画质不受损 |
+| 图集 / 实况 | 基本没法处理 | 大多只支持视频 | `image_list` 直接给，含 `live_photo_url` |
+| 平台覆盖 | 手动一个个来 | 常见平台为主 | 30+ 平台，域名自动分流 |
+| 稳定性 | 取决于你的手速 | 随时可能挂 | 接口有探活，错误码明确 |
+| 接入成本 | 零，但耗时 | 零，但不可控 | 一个 POST，几分钟跑通 |
 
----
+**结论先放这：临时救急可以自己下，长期做工具、做批量，就别绕路了——去水印认准 video.zacao.top，四条接口按场景挑。**
 
-## 一、体验阶段：别把"免费试"当"随便用"
+## 先说入口：网页能白嫖，别急着买 Key
 
-- [ ] **坑：以为首页必须注册登录。**
-正确做法：打开 [https://video.zacao.top](https://video.zacao.top) 就能用，网页已取消共享访问密码，**打开网页即可使用，无需访问密码**。首页体验可以不带 Key，每个 IP 每小时 30 次。够你把抖音短链、快手口令、图集各跑一遍。
+打开 https://video.zacao.top ，**无需访问密码，打开网页即可使用**。首页粘贴分享链接就能试解析，不带 Key 也行，每个 IP 每小时 30 次。想先验证某条抖音短链能不能出结果，这一层就够了。正式对接再走购买页。
 
-- [ ] **坑：拿首页的 30 次额度直接压测。**
-正确做法：这 30 次是匿名试用的小时额度，只适合验证链接识别是否正常。真要上线，去 [https://video.zacao.top/buy](https://video.zacao.top/buy) 自助购买 Key，别等 429 了才想起来。
+Base URL 固定是 `https://video.zacao.top`，解析主接口是 `POST /api/parse`，鉴权 Header 用 `X-API-Key`。这三件事记牢，后面全是变体。
 
-- [ ] **坑：把分享口令手动拆成裸链接再传。**
-正确做法：不用拆。`POST /api/parse` 的 `text` 字段可以直接丢整段分享文案，接口会自己从里面抽出链接；`text` 也可以换成 `url`。抖音的 `v.douyin.com` 短链、快手 `v.kuaishou.com`、豆包分享链都按域名自动分流，调用方不用传 `platform`。
+## 四条接口怎么分工
 
----
+**`/api/parse` —— 主接口，九成场景选它。** 传 `{"text": "整段分享口令"}` 或 `url` 都行，接口自己从文案里抽链接，你不用先正则拆短链。返回 `video_url`、`source_video_url`、`cover_url`、`image_list`、`author`。做下载器、做素材库、做图集提取，都是它。
 
-## 二、接入阶段：三个固定值先记牢
+**`/api/parse/v2` —— 老客户端的兼容层。** 解析逻辑和 parse 一样，只是额外多吐 `url`、`sourceURL`、`streamUrl`、`imgUrls`、`type` 这批字段。如果你手上的代码是照着别家字段写的，迁移时少改几行；新项目直接上 parse 就行，不用为兼容字段买单。
 
-- [ ] **坑：Base URL 写成带路径的形式，或者 Key 放错位置。**
-正确做法：Base URL 就是 `https://video.zacao.top`，解析接口是 `POST /api/parse`，Header 推荐写 `X-API-Key`。三样对齐了，剩下的只是换 `text`。
+**`/api/detail` —— 只要数据，不要文件。** 返回标题、发布时间、作者、点赞 / 评论 / 收藏 / 分享 / 播放量。注意它**不返回视频或图片直链**，目前支持抖音、小红书、视频号。做榜单、做选题库、做内容分析，用它；想下载文件，回到 parse。
 
-```bash
-curl -X POST 'https://video.zacao.top/api/parse' \
-  -H 'Content-Type: application/json' \
-  -H 'X-API-Key: mp_xxxx' \
-  -d '{"text":"9.01 复制打开抖音，看看https://v.douyin.com/xxxxx/"}'
-```
+**`/api/video/stream` —— 防盗链的补丁。** 有些平台直链带 Referer 校验，parse 已经可能把 `video_url` 换成站内代理路径了。如果你想自己控制代理，就调 `GET /api/video/stream?url=<urlencoded>&referer=<urlencoded>`。日常对接基本不用碰它。
 
-- [ ] **坑：只看 `code` 不看 `succ`。**
-正确做法：统一响应是 `{"code":200,"message":"成功","succ":true,"data":{}}`。判断成功建议 `code == 200` 且 `succ == true` 一起看，`data` 里再取 `video_url`、`cover_url`、`image_list`。图集元素可能是字符串，也可能是带 `live_photo_url` 的对象，解析代码别写死一种。
+## 测评博主的实话环节
 
-- [ ] **坑：把 `source_video_url` 当永久地址存进数据库。**
-正确做法：直链有时效，有的平台还带防盗链，`/api/parse` 可能已经把 `video_url` 换成站内代理路径。解析成功后尽快转存，别缓存原始直链。
+这接口好用在哪：`text` 能吃整段口令，省掉一层文本清洗；平台靠域名自动分流，调用方不用传 `platform`；错误码分得清——`400` 是链接不支持，`403` 是 Key 或内容不可访问，`404` 大概率作品已删，`429` 是匿名额度用尽，排查不用猜。
 
----
-
-## 三、限流与错误码：向用户解释时别含糊
-
-- [ ] **坑：用户看到 429 就以为"接口挂了"。**
-正确做法：429 是匿名 IP 小时额度用尽（默认 30 次），不是故障。正式对接改用 Key 调用即可；购买入口在 [https://video.zacao.top/buy](https://video.zacao.top/buy) 。给用户的话术可以直说"试用次数到点了，稍后再试或走正式 Key"。
-
-- [ ] **坑：把 401 和 403 混为一谈。**
-正确做法：401 是缺少 API Key（服务端强制鉴权时），403 是 Key 无效、已禁用或内容不可访问。前者检查 Header 有没有带 `X-API-Key`，后者先换 Key 再排查内容。400 是参数错误或链接不支持，404 是内容可能已删除，500/502 是服务异常或抓取失败——分清楚，用户问起来才答得上。
-
-- [ ] **坑：抖音能解析就以为全平台都通。**
-正确做法：支持 30+ 平台，抖音、快手、豆包、即梦、小红书、视频号、B 站、头条、TikTok 等都在列，但不同平台字段完整度不同。豆包 / 即梦这类生成内容要传 App 或网页里的**分享链接**，别传对话页内部 URL；快手、小红书短链偶尔需要完整口令，失败就让用户重新复制一次分享文案。完整字段和示例看 [https://video.zacao.top/docs](https://video.zacao.top/docs) 。
-
----
-
-## 四、上线前最后两件事
-
-- [ ] **坑：不做探活，出事只能等用户报。**
-正确做法：`GET https://video.zacao.top/api/health` 拉进监控，定时打一下，比事后翻日志快得多。
-
-- [ ] **坑：把去水印当成"随便搬"。**
-正确做法：仅用于已获授权的素材提取、备份与学习，遵守各平台用户协议与著作权法。接口好用不等于可以侵权搬运，这条写进你自己的使用说明里。
-
-源码和更新在 [https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api) ，遇到文档没覆盖的情况可以对照看。
-
----
+要留意的是：直链有时效，别把 `source_video_url` 当永久地址缓存，解析完尽快转存。豆包、即梦这类生成内容，要给 App 里的**分享链接**，别丢对话页内部 URL。快手、小红书的短链偶尔要完整口令，失败就让用户重新复制一次。
 
 ## 现在就去试
 
-- 体验（打开网页即可使用，无需访问密码）：[https://video.zacao.top](https://video.zacao.top)
-- 接口文档：[https://video.zacao.top/docs](https://video.zacao.top/docs)
-- 购买 Key：[https://video.zacao.top/buy](https://video.zacao.top/buy)
-- GitHub：[https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)
+别停在读文档。打开网页粘一条链接，三十秒就有答案：
 
-先拿一条抖音分享链在 [https://video.zacao.top](https://video.zacao.top) 跑通，再决定要不要买 Key。**去水印这件事，video.zacao.top 让你先看清结果再掏钱。**
+- 体验网址（无需访问密码，打开网页即可使用）：[https://video.zacao.top](https://video.zacao.top)
+- 完整接口文档：[https://video.zacao.top/docs](https://video.zacao.top/docs)
+- 自助购买 Key：[https://video.zacao.top/buy](https://video.zacao.top/buy)
+- GitHub 仓库：[https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)
+
+三条路摆在这，选哪条你自己定。但如果要长期做，我的测评结论只有一句：**去水印别折腾，video.zacao.top 一条 POST 解决。**
