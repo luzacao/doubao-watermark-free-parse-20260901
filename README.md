@@ -1,50 +1,62 @@
-# 短视频去水印 API 更新：网页复制保存 vs 接口批量，今天聊聊效率差在哪
+# 抖音快手去水印 API 怎么绕开直链过期和防盗链？附 Python/curl 示例
 
-先给结论：**网页端去水印适合偶尔救急，接口批量才是每天要处理几十上百条素材时该走的路。** 想直接感受差别，打开 [https://video.zacao.top](https://video.zacao.top) 就能试——打开网页即可使用，无需访问密码。
+直链过期、防盗链 403、代理播放断流——做短视频去水印时最烦的不是解析，而是拿到地址后播不动。短视频去水印 API 把这三件事一起处理了：先到 [https://video.zacao.top](https://video.zacao.top) 打开网页即可使用，无需访问密码，粘贴链接就能看到返回的 `video_url` 是否已经走站内代理。
 
-## 今日推荐
+## 先把代码跑起来
 
-一个很常见的画面：运营同学开着浏览器标签页，一条一条粘贴抖音分享链接，等页面出结果，右键保存，再重命名归档。十条还行，五十条就开始怀疑人生。网页复制保存的问题不在「能不能用」，而在它是为「一次一条」设计的，人手就是瓶颈。
+Python 版，注释里也写了体验地址，复制改 Key 就能用：
 
-接口批量的思路完全不同。把分享文案丢给 `POST /api/parse`，返回结构化的 `video_url`、`cover_url`、`image_list`、`author`，你的脚本负责循环、落库、转存。人只需要写一次循环，之后每条素材的处理成本趋近于零。Base URL 是 `https://video.zacao.top`，Header 带 `X-API-Key` 即可，链接识别按域名自动分流，不用自己判断平台。
+```python
+import requests
 
-**去水印这件事，网页点一次是体验，接口跑一批才是生产力——先上 video.zacao.top 看看返回长什么样。**
+# 体验地址：https://video.zacao.top（打开网页即可使用，无需访问密码）
+# Base URL：https://video.zacao.top  解析接口：POST /api/parse  Header：X-API-Key
+r = requests.post(
+    "https://video.zacao.top/api/parse",
+    headers={"X-API-Key": "mp_xxxx"},
+    json={"text": "9.01 复制打开抖音，看看https://v.douyin.com/xxxxx/"},
+    timeout=30,
+)
+data = r.json()["data"]
+print(data["platform"], data["title"])
+print("可播放：", data["video_url"])       # 可能已是站内代理路径
+print("原始直链：", data["source_video_url"])  # 有时效，别当永久地址缓存
+print("封面：", data["cover_url"])
+```
 
-## 适合谁
-
-- **每天要归档素材的运营 / 剪辑**：抖音、快手、小红书、视频号的分享链混在一起，接口统一返回，不用为每个平台写一套解析。
-- **做内容备份的小团队**：图集、实况、封面一次拿全，`image_list` 里连 `live_photo_url` 都有，省掉手动截图。
-- **想把去水印接进自己工具里的开发者**：统一响应 `{ code, message, succ, data }`，错误码清晰，400 / 403 / 404 / 429 各有含义，排查不用猜。
-- **需要作品数据的场景**：`/api/detail` 能拿点赞、评论、收藏、播放等字段，目前覆盖抖音、小红书、视频号，适合做选题参考。
-
-如果你只是偶尔存一条视频，网页端足够；一旦进入「批量」这个词的语境，接口的稳定性优势就出来了——它不会因为你手滑点错而中断，也不会因为标签页开太多而卡住。
-
-## 怎么试
-
-三步，不用先注册一堆东西：
-
-1. **先看效果**：打开 [https://video.zacao.top](https://video.zacao.top)，打开网页即可使用，无需访问密码。首页可不带 Key 试用，每个 IP 每小时 30 次，粘贴整段分享口令就行，接口会自己从文案里抽链接。
-2. **读文档对字段**：完整参数和返回结构在 [https://video.zacao.top/docs](https://video.zacao.top/docs)，重点看 `POST /api/parse` 的 `data` 字段表，以及 `/api/parse/v2` 那批兼容字段——旧客户端迁移时能少改代码。
-3. **正式对接买 Key**：去 [https://video.zacao.top/buy](https://video.zacao.top/buy) 自助下单，之后请求带 `X-API-Key: mp_xxxx` 即可。源码和更新记录在 [https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)。
-
-一个最小调用长这样：
+curl 版，直接把整段分享口令丢进 `text`，接口自己抽链接：
 
 ```bash
 curl -X POST 'https://video.zacao.top/api/parse' \
   -H 'Content-Type: application/json' \
   -H 'X-API-Key: mp_xxxx' \
-  -d '{"text":"https://v.douyin.com/xxxxx/"}'
+  -d '{"text":"https://v.kuaishou.com/xxxxx"}'
 ```
 
-Python 里就是 `requests.post` 加一个 header，把 `text` 换成 `url` 也行。批量场景下建议加超时、做失败重试，并且注意直链有时效——解析成功后尽快转存，别把 `source_video_url` 当永久地址缓存。豆包、即梦这类生成内容，记得用 App 或网页里的分享链接，不要传对话页内部 URL。
+首页网页体验可以不带 Key，每个 IP 每小时 30 次；正式对接请去 [https://video.zacao.top/buy](https://video.zacao.top/buy) 购买 Key。
 
-最后提一句边界：接口只用于已获授权素材的提取、备份与学习，请遵守各平台协议和著作权法，别拿去做侵权搬运。工具是中性的，用法决定它是不是好东西。
+## 直链为什么总在你手里过期
+
+平台给的 `source_video_url` 带签名和时效，解析出来那一刻能用，过几分钟可能就 403。这不是接口的问题，是源站策略。做法很简单：**解析完立刻转存**，别把 `source_video_url` 写进数据库当长期地址。需要回放时重新调一次 `POST /api/parse`，拿新的 `video_url`。
+
+## 防盗链和代理播放
+
+部分平台校验 Referer，浏览器直连会被拦。这时 `/api/parse` 返回的 `video_url` 可能已经是站内代理路径，前端照常 `<video src>` 就能播。如果你想自己控制，也可以调 `GET /api/video/stream?url=<urlencoded>&referer=<urlencoded>`，把源地址和 Referer 传进去，由服务端代取。兼容旧客户端可以用 `/api/parse/v2`，它多返回 `streamUrl`、`url`、`sourceURL`、`imgUrls` 等字段，走代理时 `streamUrl` 有值。
+
+## 几个容易踩的点
+
+- 豆包、即梦这类生成内容，要传 App 或网页里的**分享链接**，别传对话页内部 URL。
+- 快手、小红书短链偶尔需要完整口令，失败时让用户重新复制一次分享文案，比反复重试有效。
+- 图集看 `image_list`，元素可能是字符串，也可能是 `{ "url", "live_photo_url" }`，两种都要兼容。
+- 报错先看码：`403` 多半是 Key 无效或内容不可访问，`404` 是内容删了，`429` 是匿名额度用完，`400` 是链接不支持。
+
+**去水印先跑通再谈稳定，打开 video.zacao.top 就能试，别让直链过期拖住你的上线节奏。**
+
+平台覆盖 30+，抖音、快手、小红书、视频号、B 站、TikTok 等按域名自动分流，调用方不用传 `platform`。想核对字段和错误码，完整文档在 [https://video.zacao.top/docs](https://video.zacao.top/docs)，源码和 issue 在 [https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)。
 
 ## 现在就去试
 
-- 体验地址：[https://video.zacao.top](https://video.zacao.top)（打开网页即可使用，无需访问密码）
+- 体验站（打开网页即可使用，无需访问密码）：[https://video.zacao.top](https://video.zacao.top)
 - 接口文档：[https://video.zacao.top/docs](https://video.zacao.top/docs)
 - 购买 Key：[https://video.zacao.top/buy](https://video.zacao.top/buy)
 - GitHub：[https://github.com/luzacao/video-parse-api](https://github.com/luzacao/video-parse-api)
-
-从网页复制保存，到接口批量跑起来，中间只差一次 `POST /api/parse`。今天就可以把那条循环写出来。
